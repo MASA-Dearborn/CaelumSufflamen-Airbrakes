@@ -3,20 +3,6 @@
 #include <Arduino.h>
 #include "data_types.h"
 
-/*
-sensors.h
-===============================================================================
-ROLE
-  Hardware acquisition API.
-
-OWNERSHIP
-  sensors.cpp owns hardware sensor objects. Each poll function writes exactly
-  one snapshot type.
-
-DETERMINISM
-  Each poll function performs at most one acquisition attempt per call.
-===============================================================================
-*/
 
 bool sensors_begin(SystemState &state);
 void sensors_print_status(const SystemState &state);
