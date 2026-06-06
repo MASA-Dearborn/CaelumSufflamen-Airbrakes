@@ -5,23 +5,14 @@
 /*
 config.h
 ===============================================================================
-ROLE
-  Central compile-time configuration for Caelum Sufflamen.
-
-ENGINEERING INTENT
+INTENT
   Hardware pins, sensor availability, scheduler periods, telemetry cadence,
-  estimator tuning, SD logging cadence, and safety gates are grouped here so
-  mission-level changes do not require editing algorithmic modules.
+  estimator tuning, SD logging cadence, and safety gates are grouped here.
 
 SAFETY DEFAULTS
   Airbrake actuation and the airbrake policy are disabled by default. A build
   must explicitly define ACTUATION_ENABLED=1 and AIRBRAKE_POLICY_ENABLED=1 before
   non-idle airbrake commands can be issued.
-
-API CONSISTENCY NOTE
-  This finalized branch uses RuntimeConfig/SystemState/KfAlt2State. Older names
-  such as Config, EepromBlob, FlightState, AuxVertLinAccel, and KalmanAlt2 are
-  intentionally not part of this API set.
 ===============================================================================
 */
 
@@ -85,7 +76,7 @@ static const uint32_t SD_FLUSH_EVERY_MS = 500UL;
 Warning mask allocation
 ------------------------------------------------------------------------------
 Bits 0..12 are reserved for core health and validity flags. The SD warning bit
-is placed after this range to preserve compatibility with larger Caelum branches.
+is placed after this range to preserve compatibility.
 */
 static const uint32_t WARN_SD_FAULT_BIT = 13UL;
 
