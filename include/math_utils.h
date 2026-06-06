@@ -6,17 +6,6 @@
 #include <string.h>
 #include <stdlib.h>
 
-/*
-math_utils.h
-===============================================================================
-ROLE
-  Stateless helper functions shared by modules.
-
-DESIGN RULE
-  Helpers here are deterministic and side-effect free except explicit in-place
-  string normalization functions. No helper performs hardware I/O.
-===============================================================================
-*/
 
 /*
 is_finite_f(...)
