@@ -8,14 +8,11 @@
 /*
 data_types.h
 ===============================================================================
-ROLE
-  Shared data contracts for the modular Caelum Sufflamen firmware.
-
-SNAPSHOT CONTRACT
+SNAPSHOT
   Runtime state is exchanged through published snapshots. A snapshot is a plain
   struct containing:
 
-    valid : semantic usability of payload values.
+    valid : usability of payload values.
     t_ms  : timestamp associated with the latest publication attempt.
     seq   : monotonically increasing successful-publication counter.
     data  : numerical payload with documented units.
