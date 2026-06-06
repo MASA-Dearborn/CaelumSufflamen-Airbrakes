@@ -10,7 +10,7 @@ ROLE
   Attitude-adjacent derived computations.
 
 CURRENT SCOPE
-  The uploaded firmware branch estimates vertical acceleration by learning the
+  The firmware branch estimates vertical acceleration by learning the
   apparent gravity vector in body coordinates and projecting acceleration onto
   that learned direction. This module owns that gravity vector and projection.
 ===============================================================================
