@@ -78,10 +78,13 @@ void airbrake_policy_reset(SystemState &state) {
   state.policy.target_apogee_m = NAN;
   state.policy.apogee_error_m = NAN;
 
+  state.policy.target_nominal_m = NAN;
+  state.policy.target_effective_m = NAN;
+  state.policy.uncertainty_margin_m = NAN;
+
   g_prev_command01 = 0.0f;
   g_prev_ms = millis();
 }
-
 /*
 policy_drag_k(...)
 ------------------------------------------------------------------------------
@@ -363,6 +366,56 @@ static void policy_reset_memory(uint32_t now_ms) {
   g_prev_ms = now_ms;
 }
 
+
+
+
+/*
+policy_uncertainty_margin_m(...)
+------------------------------------------------------------------------------
+ROLE
+  Compute conservative target reduction from altitude covariance.
+
+INPUT CONTRACT
+  state.est.P00 should be finite and non-negative when estimator covariance is
+  valid.
+
+OUTPUT CONTRACT
+  Returns margin in meters. The margin is bounded to
+  POLICY_MAX_UNCERTAINTY_MARGIN_M.
+
+MECHANISM
+  1. Reject non-finite or negative P00.
+  2. Compute sigma_h = sqrt(P00).
+  3. Compute margin = POLICY_SIGMA_MARGIN_N * sigma_h.
+  4. Clamp margin to [0, POLICY_MAX_UNCERTAINTY_MARGIN_M].
+
+FAILURE BEHAVIOR
+  Invalid covariance returns zero margin.
+
+DETERMINISM
+  Constant-time scalar math. No loops. No hardware I/O. No dynamic allocation.
+*/
+static float policy_uncertainty_margin_m(const SystemState &state) {
+  if (!is_finite_f(state.est.P00) || state.est.P00 < 0.0f) {
+    return 0.0f;
+  }
+
+  float margin_m = POLICY_SIGMA_MARGIN_N * sqrtf(state.est.P00);
+
+  if (!is_finite_f(margin_m) || margin_m < 0.0f) {
+    return 0.0f;
+  }
+
+  if (margin_m > POLICY_MAX_UNCERTAINTY_MARGIN_M) {
+    margin_m = POLICY_MAX_UNCERTAINTY_MARGIN_M;
+  }
+
+  return margin_m;
+}
+
+
+
+
 /*
 airbrake_policy_compute(...)
 ------------------------------------------------------------------------------
@@ -399,21 +452,39 @@ DETERMINISM
 AirbrakePolicyOutput airbrake_policy_compute(const SystemState &state) {
   AirbrakePolicyOutput out;
 
-
-
   out.valid = false;
   out.command01 = 0.0f;
 
   out.predicted_apogee_no_brake_m = NAN;
   out.predicted_apogee_full_brake_m = NAN;
-  out.target_apogee_m = POLICY_TARGET_APOGEE_M;
+  out.target_apogee_m = NAN;
   out.apogee_error_m = NAN;
 
+  out.target_nominal_m = POLICY_TARGET_APOGEE_M;
+  out.target_effective_m = NAN;
+  out.uncertainty_margin_m = NAN;
 
 #if AIRBRAKE_POLICY_ENABLED
   const uint32_t now_ms = millis();
 
-  if (!state.est.valid || !is_finite_f(state.est.h_m) || !is_finite_f(state.est.v_mps)) {
+  if (!state.policy_runtime_enabled) {
+    policy_reset_memory(now_ms);
+    return out;
+  }
+
+  if (state.arm_state != ArmingState::ARMED) {
+    policy_reset_memory(now_ms);
+    return out;
+  }
+
+  if (!(state.phase == FlightPhase::COAST || state.phase == FlightPhase::BRAKE)) {
+    policy_reset_memory(now_ms);
+    return out;
+  }
+
+  if (!state.est.valid ||
+      !is_finite_f(state.est.h_m) ||
+      !is_finite_f(state.est.v_mps)) {
     policy_reset_memory(now_ms);
     return out;
   }
@@ -436,6 +507,37 @@ AirbrakePolicyOutput airbrake_policy_compute(const SystemState &state) {
     return out;
   }
 
+  const float uncertainty_margin_m = policy_uncertainty_margin_m(state);
+  float target_eff_m = POLICY_TARGET_APOGEE_M - uncertainty_margin_m;
+
+  if (!is_finite_f(target_eff_m)) {
+    policy_reset_memory(now_ms);
+    return out;
+  }
+
+  if (target_eff_m < 0.0f) {
+    target_eff_m = 0.0f;
+  }
+
+  const float u_max = clamp01(POLICY_MAX_COMMAND01);
+
+  const float apogee_no_brake =
+    policy_predict_apogee_m(h_m, v_mps, 0.0f);
+
+  const float apogee_full_brake =
+    policy_predict_apogee_m(h_m, v_mps, u_max);
+
+  out.predicted_apogee_no_brake_m = apogee_no_brake;
+  out.predicted_apogee_full_brake_m = apogee_full_brake;
+  out.target_apogee_m = target_eff_m;
+  out.target_nominal_m = POLICY_TARGET_APOGEE_M;
+  out.target_effective_m = target_eff_m;
+  out.uncertainty_margin_m = uncertainty_margin_m;
+
+  if (is_finite_f(apogee_no_brake)) {
+    out.apogee_error_m = apogee_no_brake - target_eff_m;
+  }
+
   float dt_s = (now_ms - g_prev_ms) * 0.001f;
   g_prev_ms = now_ms;
 
@@ -443,31 +545,12 @@ AirbrakePolicyOutput airbrake_policy_compute(const SystemState &state) {
     dt_s = 0.0f;
   }
 
-
-  const float apogee_no_brake =
-    policy_predict_apogee_m(h_m, v_mps, 0.0f);
-
-  const float u_max = clamp01(POLICY_MAX_COMMAND01);
-
-  const float apogee_full_brake =
-    policy_predict_apogee_m(h_m, v_mps, u_max);
-
-
-
-  out.predicted_apogee_no_brake_m = apogee_no_brake;
-  out.predicted_apogee_full_brake_m = apogee_full_brake;
-  out.target_apogee_m = POLICY_TARGET_APOGEE_M;
-
-  if (is_finite_f(apogee_no_brake)) {
-    out.apogee_error_m = apogee_no_brake - POLICY_TARGET_APOGEE_M;
-  }
-
-
   const float desired_command01 =
     policy_solve_command01(
       h_m,
       v_mps,
-      POLICY_TARGET_APOGEE_M);
+      target_eff_m
+    );
 
   const float command01 =
     policy_apply_slew_limit(desired_command01, dt_s);
@@ -482,3 +565,62 @@ AirbrakePolicyOutput airbrake_policy_compute(const SystemState &state) {
 
   return out;
 }
+
+
+#if AIRBRAKE_POLICY_TEST_API
+
+/*
+airbrake_policy_predict_apogee_m(...)
+------------------------------------------------------------------------------
+ROLE
+  Public test wrapper for the internal apogee predictor.
+
+INPUT CONTRACT
+  h_m is altitude in meters. v_mps is vertical speed in m/s. command01 is
+  normalized deployment command.
+
+OUTPUT CONTRACT
+  Returns predicted apogee in meters, or NAN if the internal predictor rejects
+  the inputs.
+
+MECHANISM
+  Delegates to policy_predict_apogee_m(...).
+
+FAILURE BEHAVIOR
+  Same as policy_predict_apogee_m(...).
+
+DETERMINISM
+  Constant-time scalar math. No loops. No hardware I/O. No dynamic allocation.
+*/
+float airbrake_policy_predict_apogee_m(float h_m, float v_mps, float command01) {
+  return policy_predict_apogee_m(h_m, v_mps, command01);
+}
+
+/*
+airbrake_policy_solve_command01(...)
+------------------------------------------------------------------------------
+ROLE
+  Public test wrapper for the internal apogee-command solver.
+
+INPUT CONTRACT
+  h_m is altitude in meters. v_mps is vertical speed in m/s. target_m is target
+  apogee in meters.
+
+OUTPUT CONTRACT
+  Returns normalized deployment command in [0, POLICY_MAX_COMMAND01].
+
+MECHANISM
+  Delegates to policy_solve_command01(...).
+
+FAILURE BEHAVIOR
+  Same as policy_solve_command01(...).
+
+DETERMINISM
+  Fixed-count bisection through the internal solver. No hardware I/O. No dynamic
+  allocation.
+*/
+float airbrake_policy_solve_command01(float h_m, float v_mps, float target_m) {
+  return policy_solve_command01(h_m, v_mps, target_m);
+}
+
+#endif
