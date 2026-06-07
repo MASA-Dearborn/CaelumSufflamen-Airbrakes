@@ -30,36 +30,7 @@ struct RuntimeConfig {
   float baro_baseline_hpa = NAN;
 };
 
-struct MagCal {
-  float off_x = 0.0f;
-  float off_y = 0.0f;
-  float off_z = 0.0f;
 
-  float scl_x = 1.0f;
-  float scl_y = 1.0f;
-  float scl_z = 1.0f;
-
-  bool valid = false;
-
-  float rx = NAN;
-  float ry = NAN;
-  float rz = NAN;
-};
-
-struct Config {
-  float sea_level_hpa = 1013.25f;
-  float baro_baseline_hpa = NAN;
-  float declination_deg = 0.0f;
-
-  MagCal mag_cal;
-
-  int16_t servo_us_min = 1000;
-  int16_t servo_us_max = 2000;
-  int16_t servo_us_idle = 1000;
-
-  bool valid = true;
-  bool serial_header_enable = true;
-};
 
 struct ActuatorConfig {
   int16_t servo_us_min = 1000;
@@ -125,10 +96,10 @@ struct AttitudeSample {
   uint32_t t_us = 0;
   uint32_t seq = 0;
 
-  float qw = 1.0f;
-  float qx = 0.0f;
-  float qy = 0.0f;
-  float qz = 0.0f;
+  float q0 = 1.0f;
+  float q1 = 0.0f;
+  float q2 = 0.0f;
+  float q3 = 0.0f;
 
   float roll_deg = NAN;
   float pitch_deg = NAN;
@@ -161,6 +132,7 @@ struct EstimatorSample {
 
   float h_m = 0.0f;
   float v_mps = 0.0f;
+  float a_mps2 = NAN;
 
   float altitude_m = NAN;
   float vz_mps = NAN;
@@ -170,6 +142,10 @@ struct EstimatorSample {
   float P10 = 0.0f;
   float P11 = 1.0f;
 };
+
+
+
+
 
 struct FlightState {
   bool valid = false;
@@ -227,10 +203,65 @@ enum class FlightPhase : uint8_t {
   DESCENT = 4
 };
 
+
 struct AirbrakePolicyOutput {
-  float command01 = 0.0f;
   bool valid = false;
+
+  /*
+  command01
+  -------------------------------------------------------------------------------
+  Normalized deployment command.
+
+  Meaning:
+    0.0 = fully retracted / no deployment intent
+    1.0 = maximum permitted deployment intent
+
+  This is still only policy intent. The safety and actuator modules decide whether
+  this command reaches hardware.
+  */
+  float command01 = 0.0f;
+
+  /*
+  predicted_apogee_no_brake_m
+  -------------------------------------------------------------------------------
+  Predicted coast apogee if the airbrakes remain fully retracted.
+
+  This field is useful for checking whether the vehicle is expected to overshoot
+  the target without braking.
+  */
+  float predicted_apogee_no_brake_m = NAN;
+
+  /*
+  predicted_apogee_full_brake_m
+  -------------------------------------------------------------------------------
+  Predicted coast apogee at maximum permitted deployment.
+
+  This field indicates whether the airbrakes have enough modeled authority to
+  bring the vehicle down to the target.
+  */
+  float predicted_apogee_full_brake_m = NAN;
+
+  /*
+  target_apogee_m
+  -------------------------------------------------------------------------------
+  Target apogee used by the policy for the current computation.
+  */
+  float target_apogee_m = NAN;
+
+  /*
+  apogee_error_m
+  -------------------------------------------------------------------------------
+  Closed-brake predicted apogee error:
+
+    predicted_apogee_no_brake_m - target_apogee_m
+
+  Positive error means the vehicle is predicted to overshoot the target if no
+  braking is applied.
+  */
+  float apogee_error_m = NAN;
 };
+
+
 
 struct KfAlt2State {
   bool seeded = false;
@@ -238,20 +269,13 @@ struct KfAlt2State {
   float h_m = 0.0f;
   float v_mps = 0.0f;
 
-  float x0 = 0.0f;
-  float x1 = 0.0f;
-
   float P00 = 1.0f;
   float P01 = 0.0f;
   float P10 = 0.0f;
   float P11 = 1.0f;
-
-  float q_acc = 4.0f;
-  float r_meas = 4.0f;
-
-  uint32_t t_ms = 0;
-  uint32_t t_us = 0;
 };
+
+
 
 using KalmanAlt2 = KfAlt2State;
 
@@ -268,25 +292,10 @@ struct SdLoggerState {
 
   char filename[16] = "NONE";
 
-  bool baro_ref_set = false;
-  float baro_ref_alt_m = NAN;
-  float ref_basis_baseline_hpa = NAN;
-  float ref_basis_slp_hpa = 1013.25f;
-
-  float g_bx = 0.0f;
-  float g_by = 0.0f;
-  float g_bz = -9.8f;
-
-  float kf_h = 0.0f;
-  float kf_v = 0.0f;
-
-  float P00 = 1.0f;
-  float P01 = 0.0f;
-  float P10 = 0.0f;
-  float P11 = 1.0f;
-
   File file;
 };
+
+
 
 enum PlotMode {
   PLOT_MODE_OFF = 0,
@@ -303,7 +312,7 @@ struct SystemState {
   BaroSample baro;
   ImuSample imu;
   AuxSample aux;
-  AttitudeSample att;
+  AttitudeSample attitude;
   AuxVzSample auxvz;
   EstimatorSample est;
   FlightState flight;
