@@ -8,6 +8,8 @@
 #include "estimation.h"
 #include "sd_logger.h"
 #include "sensors.h"
+#include "airbrake_policy.h"
+
 
 /*
 commands.cpp
@@ -48,7 +50,63 @@ DETERMINISM
   Bounded Serial output. No loops. No hardware I/O. No dynamic allocation.
 */
 void commands_print_help(void) {
-  Serial.println(F("HELP,CMDS=HELP|STATUS|HDR 0|1|CAP_BASELINE|CAL_BASELINE|SET_SLP <hpa>"));
+  Serial.println(
+    F("HELP,CMDS=HELP|STATUS|HDR 0|1|CAP_BASELINE|CAL_BASELINE|SET_SLP <hpa>|SIM_APOGEE <h_m> <v_mps>"));
+}
+
+
+/*
+parse_two_float_args(...)
+------------------------------------------------------------------------------
+ROLE
+  Parse two whitespace-separated floating-point command arguments.
+
+INPUT CONTRACT
+  s must point to a null-terminated argument string. out_a and out_b must be
+  valid output pointers.
+
+OUTPUT CONTRACT
+  Returns true only when exactly two floating-point values are parsed and the
+  trailing suffix contains only whitespace.
+
+MECHANISM
+  1. Parse first number with strtod.
+  2. Parse second number with strtod.
+  3. Reject missing numbers.
+  4. Reject non-whitespace trailing text.
+  5. Store parsed values.
+
+FAILURE BEHAVIOR
+  Invalid input returns false and does not rely on partial parse results.
+
+DETERMINISM
+  Bounded string parse. No heap allocation. No hardware I/O.
+*/
+static bool parse_two_float_args(const char *s, float *out_a, float *out_b) {
+  if (!s || !out_a || !out_b) return false;
+
+  char *end_a = NULL;
+  const double a = strtod(s, &end_a);
+
+  if (end_a == s) return false;
+
+  char *end_b = NULL;
+  const double b = strtod(end_a, &end_b);
+
+  if (end_b == end_a) return false;
+
+  while (*end_b) {
+    if (!isspace((unsigned char)*end_b)) {
+      return false;
+    }
+
+    ++end_b;
+  }
+
+  *out_a = (float)a;
+  *out_b = (float)b;
+
+  return true;
 }
 
 /*
@@ -161,6 +219,51 @@ static void handle_command(SystemState &s, char *line) {
       Serial.println(F("ERR,CAL_BASELINE"));
     }
 
+    #if AIRBRAKE_POLICY_TEST_API
+        if (strcmp(line, "SIM_APOGEE") == 0) {
+          float h_m = NAN;
+          float v_mps = NAN;
+
+          if (!arg || !parse_two_float_args(arg, &h_m, &v_mps)) {
+            Serial.println(F("ERR,SIM_APOGEE"));
+            return;
+          }
+
+          const float u_max = clamp01(POLICY_MAX_COMMAND01);
+
+          const float apogee0 =
+            airbrake_policy_predict_apogee_m(h_m, v_mps, 0.0f);
+
+          const float apogee1 =
+            airbrake_policy_predict_apogee_m(h_m, v_mps, u_max);
+
+          const float cmd =
+            airbrake_policy_solve_command01(
+              h_m,
+              v_mps,
+              POLICY_TARGET_APOGEE_M);
+
+          Serial.print(F("SIM_APOGEE,h="));
+          Serial.print(h_m);
+
+          Serial.print(F(",v="));
+          Serial.print(v_mps);
+
+          Serial.print(F(",apogee0="));
+          Serial.print(apogee0);
+
+          Serial.print(F(",apogee1="));
+          Serial.print(apogee1);
+
+          Serial.print(F(",target="));
+          Serial.print(POLICY_TARGET_APOGEE_M);
+
+          Serial.print(F(",cmd="));
+          Serial.println(cmd);
+
+          return;
+        }
+    #endif
     return;
   }
 
