@@ -1,226 +1,309 @@
-# Caelum Sufflamen
+# Caelum Sufflamen Airbrakes
 
-### Deterministic Flight Software, Avionics, and State Estimation Framework
+**Caelum Sufflamen** is a deterministic embedded avionics and airbrake-control software scaffold for high-power rocketry research. The project focuses on bounded scheduling, sensor snapshot traceability, Kalman-filter-based vertical state estimation, safety-gated actuation, real-time telemetry, and persistent SD-card flight logging.
 
-Caelum Sufflamen is a flight-computer and avionics software platform developed to explore deterministic embedded systems, state estimation, telemetry, and safety-oriented flight architectures for amateur aerospace applications.
-
-The project combines real-time sensor acquisition, Kalman-filter-based state estimation, onboard data logging, telemetry generation, and health monitoring into a unified avionics framework designed around reliability, observability, and reproducibility.
+The current implementation is designed as an engineering and verification platform. Non-idle airbrake motion is disabled by default unless the build explicitly enables the compile-time actuation and policy gates.
 
 ---
 
-## Project Objectives
+## System Overview
 
-The primary goals of the project were:
+The firmware is organized as a deterministic single-threaded pipeline:
 
-* Develop a deterministic flight-software architecture.
-* Implement real-time multi-sensor data acquisition.
-* Explore flight-state estimation using Kalman filtering.
-* Design a telemetry and diagnostics framework.
-* Build a robust SD-card flight logging pipeline.
-* Investigate safety-oriented avionics design principles.
-* Create a platform suitable for future control-law and airbrake research.
+```text
+Heartbeat + Commands
+        |
+        v
+Time-Gated Scheduler
+        |
+        v
+Sensor Snapshot Publication
+        |
+        v
+Madgwick Attitude + Vertical Acceleration
+        |
+        v
+2-State Kalman Altitude / Vertical Velocity Estimator
+        |
+        v
+Airbrake Policy Intent
+        |
+        v
+Safety-Gated Actuator Output
+        |
+        v
+Serial Telemetry + Diagnostics + SD Logging
+```
 
----
-
-## System Architecture
-
-### Sensor Suite
-
-| Sensor               | Purpose                                     |
-| -------------------- | ------------------------------------------- |
-| BMP5xx               | Barometric pressure and altitude estimation |
-| BMI088 Accelerometer | Linear acceleration measurement             |
-| BMI088 Gyroscope     | Angular rate measurement                    |
-| LIS2DU12             | Auxiliary acceleration measurement          |
-
-The software continuously acquires data from all sensors and produces synchronized state information at fixed update rates.
-
----
-
-## State Estimation
-
-A two-state Kalman filter estimates:
-
-[
-x =
-\begin{bmatrix}
-h \
-v
-\end{bmatrix}
-]
-
-where:
-
-* (h) = altitude
-* (v) = vertical velocity
-
-The estimator fuses:
-
-* Barometric altitude measurements
-* Vertical acceleration measurements derived from IMU data
-
-Features include:
-
-* Prediction/update architecture
-* Covariance propagation
-* Real-time innovation correction
-* Relative-altitude reference management
-* Estimator confidence tracking
+The top-level `loop()` performs bounded work only. Sensor calls are one-attempt polling calls, estimator work is scalar math, and unsafe or invalid states force the actuator to idle.
 
 ---
 
-## Avionics Features
+## Repository Layout
+
+```text
+CaelumSufflamen-Airbrakes/
+├── CaelumSufflamen.ino      # Top-level Arduino/Teensy scheduler
+├── include/                 # Core public interfaces and data contracts
+│   ├── airbrake_policy.h
+│   ├── actuator.h
+│   ├── attitude.h
+│   ├── config.h
+│   ├── data_types.h
+│   ├── estimation.h
+│   ├── kalman_alt2.h
+│   ├── safety.h
+│   └── sensors.h
+├── src/                     # Core subsystem implementations
+│   ├── airbrake_policy.cpp
+│   ├── actuator.cpp
+│   ├── attitude.cpp
+│   ├── config.cpp
+│   ├── estimation.cpp
+│   ├── kalman_alt2.cpp
+│   ├── safety.cpp
+│   └── sensors.cpp
+└── utils/                   # Telemetry, commands, SD logging, math helpers
+    ├── commands.cpp
+    ├── math_utils.h
+    ├── sd_logger.cpp
+    ├── sd_logger.h
+    └── telemetry.cpp
+```
+
+> **Integration note:** the top-level sketch includes utility headers such as `commands.h`, `telemetry.h`, `sd_logger.h`, and `math_utils.h`. The implementation should keep header locations and include paths consistent with the selected build system.
+
+---
+
+## Hardware Target
+
+The project is intended for a Teensy-class embedded target, with the current architecture matching a Teensy 4.1 style avionics stack.
+
+### Current Sensor Suite
+
+| Subsystem | Device / Interface | Purpose |
+|---|---|---|
+| Barometer | BMP5xx over I2C | Pressure, temperature, altitude measurement |
+| Primary IMU | BMI088 accelerometer + gyroscope over I2C | Body-frame acceleration and angular rate |
+| Auxiliary accelerometer | LIS2DU12 over I2C | Auxiliary acceleration stream |
+| Storage | Built-in / attached SD interface | Persistent CSV flight/test logging |
+| Actuator | Servo PWM on `PIN_AIRBRAKE_SERVO` | Airbrake deployment output |
+
+---
+
+## Core Software Concepts
+
+### Published Snapshots
+
+The shared runtime state is represented through validity-qualified snapshots. Each major measurement or estimate contains:
+
+- `valid`: whether the numeric payload is semantically usable,
+- `updated`: whether a new sample/event was published for estimator consumption,
+- `t_ms`: millisecond timestamp for diagnostics and freshness checks,
+- `t_us`: microsecond timestamp for measured-`dt` propagation,
+- `seq`: monotonically increasing publication counter,
+- numeric payload fields with explicit units.
+
+Downstream modules should consume payload values only when `valid == true` and the required numeric fields are finite.
 
 ### Deterministic Scheduling
 
-The flight software operates using fixed-rate execution loops:
+The top-level scheduler runs at 50 Hz:
 
-* Main control loop: 50 Hz
-* Telemetry output: 10 Hz
-* Diagnostics output: 1 Hz
-* SD logging: 50 Hz
+```cpp
+static const uint32_t LOOP_HZ = 50UL;
+static const uint32_t LOOP_PERIOD_US = 1000000UL / LOOP_HZ;
+```
 
-This architecture ensures predictable execution timing and simplifies system validation.
+Telemetry is emitted at 10 Hz, diagnostics at 1 Hz, and SD logging at 50 Hz by default.
 
-### Health Monitoring
+### Attitude and Vertical Acceleration
 
-Continuous monitoring of:
+The attitude module implements a Madgwick-style quaternion update using gyro and accelerometer input. The quaternion is used to rotate body-frame acceleration into world vertical acceleration. Gravity is then removed so the estimator can use the resulting vertical linear acceleration as a Kalman prediction input.
 
-* Sensor initialization status
-* Data validity
-* Sensor freshness
-* Estimator validity
-* SD-card health
-* Logging status
+### Kalman Estimator
 
-A consolidated warning-mask system provides rapid fault visibility.
+The vertical estimator uses a 2-state Kalman filter:
 
-### Telemetry
+```text
+x = [ h, v ]^T
+```
 
-Real-time telemetry includes:
+where:
 
-* Altitude
-* Pressure
-* Temperature
-* Acceleration
-* Angular velocity
-* Vertical velocity
-* Estimator state
-* Warning flags
-* Configuration state
+- `h` is altitude in meters,
+- `v` is vertical velocity in meters per second.
 
-The telemetry interface is designed for both machine parsing and live operator monitoring.
+The estimator uses:
+
+- barometric altitude as the measurement update,
+- quaternion-derived vertical acceleration as the prediction input,
+- measured IMU `dt` rather than a fixed estimator timestep.
 
 ---
 
-## Flight Data Logging
+## Safety Model
 
-The onboard logger automatically:
+Airbrake actuation is intentionally gated at multiple layers.
 
-* Creates unique log files
-* Records synchronized sensor data
-* Logs estimator states
-* Stores covariance information
-* Periodically flushes data to reduce loss risk
+### Compile-Time Gates
 
-Recorded datasets support post-flight analysis, estimator tuning, and validation.
+By default, both are disabled:
 
----
+```cpp
+#ifndef ACTUATION_ENABLED
+#define ACTUATION_ENABLED 0
+#endif
 
-## Visualization and Diagnostics
+#ifndef AIRBRAKE_POLICY_ENABLED
+#define AIRBRAKE_POLICY_ENABLED 0
+#endif
+```
 
-The software includes multiple real-time plotting modes:
+With these defaults, the firmware may compute estimates and telemetry, but it will not command non-idle actuator motion.
 
-### Overview Mode
+### Runtime Gates
 
-Flight-state overview and health indicators.
+The actuator is forced idle unless:
 
-### IMU Mode
+1. actuation is compiled in,
+2. the estimator is valid and fresh,
+3. the airbrake policy returns a valid command,
+4. the safety predicate allows actuation.
 
-Raw inertial sensor monitoring.
-
-### Apogee Mode
-
-Altitude, vertical velocity, residuals, and projected apogee.
-
-### Unified Mode
-
-Full system visualization for development and tuning.
+Invalid estimator data, stale state, disabled policy, SD faults, or sensor faults are surfaced through telemetry and diagnostics.
 
 ---
 
-## Command Interface
+## Serial Commands
 
-Runtime configuration is supported through a serial command console.
-
-Available commands include:
+The current command parser supports:
 
 ```text
 HELP
 STATUS
 HDR 0|1
-PLOT OFF|OVERVIEW|IMU|APOGEE|UNIFIED
 SET_SLP <hpa>
 CAP_BASELINE
+CAL_BASELINE
 ```
 
-This interface enables live debugging and estimator tuning without recompilation.
+### Command Descriptions
+
+| Command | Purpose |
+|---|---|
+| `HELP` | Print supported command list |
+| `STATUS` | Print compact health/status information |
+| `HDR 0` | Disable telemetry header emission |
+| `HDR 1` | Enable telemetry header emission and print header |
+| `SET_SLP <hpa>` | Set sea-level reference pressure in hPa |
+| `CAP_BASELINE` | Capture current valid barometer pressure as baseline |
+| `CAL_BASELINE` | Run bounded averaged barometer baseline calibration |
+
+`CAL_BASELINE` is an intentional bounded blocking ground operation and should not be used during flight runtime.
 
 ---
 
-## Engineering Focus
+## Telemetry and Logging
 
-This project emphasizes:
+The firmware emits CSV-style serial telemetry and diagnostics. It also logs synchronized flight/test data to SD when available.
 
-* Embedded systems engineering
-* Aerospace avionics
-* Sensor fusion
-* Kalman filtering
-* State estimation
-* Real-time software
-* Safety-oriented architectures
-* Telemetry systems
-* Flight-data analysis
+Logged and telemetered fields include:
 
-Rather than focusing solely on flight functionality, the project investigates how rigorous software architecture, deterministic execution, and mathematical estimation techniques can improve the reliability and observability of embedded aerospace systems.
+- barometer validity, pressure, temperature, and altitude,
+- IMU validity, acceleration, and angular rate,
+- auxiliary acceleration,
+- quaternion attitude state,
+- vertical acceleration,
+- Kalman altitude and vertical velocity,
+- covariance terms,
+- configuration references,
+- warning masks.
 
----
-
-## Technologies
-
-* C++
-* Arduino Framework
-* BMP5xx Sensor Suite
-* BMI088 IMU
-* LIS2DU12 Accelerometer
-* SD Storage Interface
-* Kalman Filtering
-* Serial Telemetry
-* Embedded State Estimation
+SD failure is non-fatal. If SD initialization or runtime writes fail, the logger disables itself and the rest of the firmware continues operating.
 
 ---
 
-## Future Development
+## Build Notes
 
-Planned extensions include:
+This project uses Arduino-style C++ targeting Teensy-class hardware.
 
-* Airbrake deployment control
-* Formal flight-state machine integration
-* Redundant sensor fusion
-* Magnetometer-based heading estimation
-* GPS integration
-* Wireless telemetry
-* Adaptive filtering techniques
-* Advanced flight-event detection
-* Closed-loop control algorithms
+### Expected Tooling
+
+- Arduino IDE or Arduino CLI with Teensy board support
+- Teensyduino / Teensy board package
+- Compatible sensor libraries:
+  - `Adafruit_BMP5xx`
+  - `BMI088`
+  - `LIS2DU12Sensor`
+  - `SD`
+  - `PWMServo` or `Servo`
+
+### Include Path Note
+
+The repository currently separates source files into `include/`, `src/`, and `utils/`. The build environment must compile the `.cpp` files in both implementation folders and make the header folders available on the include path.
+
+For an Arduino IDE sketch-only workflow, this may require moving files into the sketch folder or configuring a supported build system that understands the current folder layout.
 
 ---
 
-## Author
+## Suggested Verification Checklist
 
-**David Richardson**
+### Static / Compile Verification
 
-Computer Engineering Student
-University of Michigan–Dearborn
+- Confirm every `#include` resolves under the selected build system.
+- Confirm all `.cpp` files in `src/` and `utils/` are compiled.
+- Confirm the selected board target provides required Teensy macros and SD definitions.
+- Confirm `ACTUATION_ENABLED` and `AIRBRAKE_POLICY_ENABLED` are intentionally set.
 
-Focused on FPGA systems, embedded software, computational physics, state estimation, and aerospace-oriented engineering systems.
+### Bench Verification
+
+- Boot with actuation disabled.
+- Confirm `BOOT,BEGIN` and `BOOT,READY` appear on Serial.
+- Confirm sensor health lines match connected hardware.
+- Confirm `CAL_BASELINE` returns `ACK,CAL_BASELINE,<pressure>` when the barometer is present.
+- Confirm telemetry rows preserve a stable CSV field order.
+- Confirm SD logging creates unique `LOG###.CSV` files when SD is available.
+
+### Estimator Verification
+
+- At rest, confirm quaternion values remain finite and normalized.
+- Confirm vertical acceleration is finite after valid IMU and attitude updates.
+- Confirm the Kalman estimator seeds only after valid barometric altitude exists.
+- Confirm estimator altitude remains near zero after baseline calibration at rest.
+- Confirm covariance terms remain finite.
+
+### Actuation Verification
+
+- With default compile-time safety settings, confirm the actuator remains idle.
+- Enable actuation only for controlled bench testing.
+- Confirm invalid estimator state forces idle.
+- Confirm disabled or invalid policy output forces idle.
+
+---
+
+## Current Development Status
+
+This repository represents a modular embedded avionics research scaffold. It is suitable for architecture review, bench testing, estimator validation, telemetry/logging development, and future airbrake-control policy work.
+
+Before flight use, the system should undergo:
+
+- full compile verification in the target build system,
+- hardware-in-the-loop bench testing,
+- sensor calibration validation,
+- estimator tuning from logged data,
+- actuator range and failsafe validation,
+- simulation-based airbrake policy validation,
+- documented preflight and postflight review procedures.
+
+---
+
+## Safety Notice
+
+This software is experimental research firmware for aerospace systems. It is not a certified flight controller. Any use in a flight article must be preceded by independent review, ground testing, simulation, and compliance with all applicable range safety and team procedures.
+
+---
+
+## Author / Organization
+
+Developed for the MASA Dearborn airbrakes / avionics effort.
