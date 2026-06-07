@@ -203,7 +203,6 @@ enum class FlightPhase : uint8_t {
   DESCENT = 4
 };
 
-
 struct AirbrakePolicyOutput {
   bool valid = false;
 
@@ -216,18 +215,15 @@ struct AirbrakePolicyOutput {
     0.0 = fully retracted / no deployment intent
     1.0 = maximum permitted deployment intent
 
-  This is still only policy intent. The safety and actuator modules decide whether
-  this command reaches hardware.
+  This is policy intent only. The safety and actuator modules decide whether this
+  command reaches hardware.
   */
   float command01 = 0.0f;
 
   /*
   predicted_apogee_no_brake_m
   -------------------------------------------------------------------------------
-  Predicted coast apogee if the airbrakes remain fully retracted.
-
-  This field is useful for checking whether the vehicle is expected to overshoot
-  the target without braking.
+  Predicted coast apogee if airbrakes remain fully retracted.
   */
   float predicted_apogee_no_brake_m = NAN;
 
@@ -235,16 +231,16 @@ struct AirbrakePolicyOutput {
   predicted_apogee_full_brake_m
   -------------------------------------------------------------------------------
   Predicted coast apogee at maximum permitted deployment.
-
-  This field indicates whether the airbrakes have enough modeled authority to
-  bring the vehicle down to the target.
   */
   float predicted_apogee_full_brake_m = NAN;
 
   /*
   target_apogee_m
   -------------------------------------------------------------------------------
-  Target apogee used by the policy for the current computation.
+  Effective target apogee used by the current policy computation.
+
+  This may be lower than the nominal target when covariance-aware uncertainty
+  margin is active.
   */
   float target_apogee_m = NAN;
 
@@ -254,14 +250,30 @@ struct AirbrakePolicyOutput {
   Closed-brake predicted apogee error:
 
     predicted_apogee_no_brake_m - target_apogee_m
-
-  Positive error means the vehicle is predicted to overshoot the target if no
-  braking is applied.
   */
   float apogee_error_m = NAN;
+
+  /*
+  target_nominal_m
+  -------------------------------------------------------------------------------
+  Nominal configured target before uncertainty margin.
+  */
+  float target_nominal_m = NAN;
+
+  /*
+  target_effective_m
+  -------------------------------------------------------------------------------
+  Target after subtracting the covariance-aware uncertainty margin.
+  */
+  float target_effective_m = NAN;
+
+  /*
+  uncertainty_margin_m
+  -------------------------------------------------------------------------------
+  Altitude uncertainty margin subtracted from the nominal target.
+  */
+  float uncertainty_margin_m = NAN;
 };
-
-
 
 struct KfAlt2State {
   bool seeded = false;
