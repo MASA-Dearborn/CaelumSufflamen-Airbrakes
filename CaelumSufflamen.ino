@@ -20,24 +20,24 @@ ROLE
   Top-level deterministic scheduler and orchestration layer.
 
 ORDERING CONTRACT
-  The runtime order is intentionally fixed:
+  Runtime order is intentionally fixed:
 
     1. Heartbeat and command service.
     2. Time-gated loop admission.
     3. Sensor snapshot publication.
-    4. Derived vertical acceleration update.
-    5. Kalman estimator update.
-    6. Safety and policy evaluation.
-    7. Safety-gated actuator update.
-    8. Telemetry, diagnostics, and SD logging.
+    4. Madgwick/Kalman estimator update.
+    5. Safety and policy evaluation.
+    6. Safety-gated actuator update.
+    7. Telemetry, diagnostics, and SD logging.
 
-  This order ensures that downstream computations consume the freshest published
-  snapshots available in the current cycle and that telemetry reflects the same
-  state used for policy and actuator decisions.
+  This order ensures downstream computations consume the freshest snapshots
+  available in the current cycle and telemetry reflects the same state used for
+  policy and actuator decisions.
 
 DETERMINISM CONTRACT
-  loop() does not contain hidden waits, heap allocation, retry loops, or blocking
-  sensor transactions. Each subsystem call performs bounded work.
+  loop() contains no hidden waits, heap allocation, retry loops, or blocking
+  sensor transactions. CAL_BASELINE and boot calibration are deliberate bounded
+  ground/boot operations, not flight-loop operations.
 ===============================================================================
 */
 
@@ -51,25 +51,32 @@ static uint32_t last_diag_ms = 0;
 static uint32_t last_tlm_ms = 0;
 
 /*
-initialize_state()
+initialize_state(...)
 ------------------------------------------------------------------------------
 ROLE
-  Populate all runtime structures with known conservative defaults before any
-  hardware initialization occurs.
+  Populate runtime structures with known conservative defaults before hardware
+  initialization.
+
+INPUT CONTRACT
+  No inputs are required. The global state object exists statically.
+
+OUTPUT CONTRACT
+  Configuration, actuator calibration, attitude, estimator, and policy state are
+  initialized to safe defaults.
 
 MECHANISM
-  Default member initializers in data_types.h establish most safe defaults. This
-  function then explicitly sets the few fields tied to compile-time constants and
-  resets estimator/policy/gravity modules through their owning APIs.
+  1. Set runtime configuration defaults.
+  2. Set actuator calibration defaults.
+  3. Reset attitude to identity.
+  4. Reset estimator and policy outputs.
 
-SAFETY
-  The actuator command starts invalid and the actuator configuration starts at
-  idle-safe defaults. The servo is not attached here; attachment belongs to the
-  actuator module.
+FAILURE BEHAVIOR
+  No failure path exists.
+
+DETERMINISM
+  Constant-time assignments. No hardware I/O. No dynamic allocation.
 */
 static void initialize_state(void) {
-  state = SystemState();
-
   state.cfg.valid = true;
   state.cfg.serial_header_enable = true;
   state.cfg.sea_level_hpa = DEFAULT_SEA_LEVEL_HPA;
@@ -79,20 +86,31 @@ static void initialize_state(void) {
   state.actuator_cfg.servo_us_max = SERVO_US_MAX_DEFAULT;
   state.actuator_cfg.servo_us_idle = SERVO_US_IDLE_DEFAULT;
 
-  attitude_reset_gravity_reference(state);
+  attitude_begin(state);
   estimation_reset(state);
   airbrake_policy_reset(state);
 }
 
 /*
-heartbeat()
+heartbeat(...)
 ------------------------------------------------------------------------------
 ROLE
   Toggle the status LED at a fixed low-rate cadence.
 
+INPUT CONTRACT
+  STATUS_LED must have been configured as OUTPUT.
+
+OUTPUT CONTRACT
+  LED state toggles whenever HEARTBEAT_MS has elapsed.
+
 MECHANISM
-  millis() subtraction is used so wraparound behavior remains well-defined for
-  unsigned timestamps.
+  1. Read millis().
+  2. Compare unsigned elapsed time against HEARTBEAT_MS.
+  3. Toggle stored LED state.
+  4. Write LED pin and update timestamp.
+
+FAILURE BEHAVIOR
+  No failure path exists.
 
 DETERMINISM
   Constant-time pin update only when due.
@@ -108,23 +126,36 @@ static void heartbeat(void) {
 }
 
 /*
-setup()
+setup(...)
 ------------------------------------------------------------------------------
 ROLE
   Perform one-time initialization and publish boot diagnostics.
 
-STEP-BY-STEP
-  1. Initialize all software state to conservative defaults.
-  2. Configure LED and Serial.
-  3. Initialize SD logger after Serial is ready because it prints boot status.
-  4. Initialize sensors and print health results.
-  5. Attach actuator and force idle.
-  6. Print command help and telemetry header.
-  7. Establish scheduler baselines.
+INPUT CONTRACT
+  Arduino runtime must have started.
+
+OUTPUT CONTRACT
+  Sensors, estimator, SD logger, actuator, telemetry, and scheduler baselines are
+  initialized. Sensor/SD failures are reported but are not fatal.
+
+MECHANISM
+  1. Initialize software state.
+  2. Configure status LED and Serial.
+  3. Initialize sensors and print health.
+  4. Attempt boot barometer baseline calibration when BMP is available.
+  5. Reset estimator after baseline capture.
+  6. Initialize SD logger after baseline so logged basis matches estimator basis.
+  7. Attach actuator and force idle.
+  8. Print command help and telemetry header.
+  9. Establish scheduler baselines.
 
 FAILURE BEHAVIOR
-  Sensor and SD initialization failures are recorded in SystemState. The system
-  still boots so telemetry can expose partial subsystem availability.
+  Sensor and SD initialization failures are stored in SystemState and reported by
+  telemetry. The firmware continues with partial subsystem availability.
+
+DETERMINISM
+  Boot contains bounded waits only: Serial wait timeout and barometer calibration.
+  Runtime loop remains non-blocking.
 */
 void setup() {
   initialize_state();
@@ -140,10 +171,21 @@ void setup() {
 
   Serial.println(F("BOOT,BEGIN"));
 
-  sd_logger_init(state);
-
   sensors_begin(state);
   sensors_print_status(state);
+
+  if (state.health.bmp_ok) {
+    if (sensors_calibrate_baro_base(state, BARO_CALIB_SAMPLES)) {
+      estimation_reset(state);
+
+      Serial.print(F("BOOT,BARO_BASELINE,"));
+      Serial.println(state.cfg.baro_baseline_hpa);
+    } else {
+      Serial.println(F("BOOT,BARO_BASELINE,FAIL"));
+    }
+  }
+
+  sd_logger_init(state);
 
   actuator_begin(state.actuator_cfg);
   actuator_force_idle();
@@ -159,19 +201,37 @@ void setup() {
 }
 
 /*
-loop()
+loop(...)
 ------------------------------------------------------------------------------
 ROLE
   Execute one bounded scheduler pass.
 
-MECHANISM
-  The outer loop runs frequently, but the main flight pipeline is admitted only
-  when LOOP_PERIOD_US has elapsed. Diagnostics may still emit while waiting.
+INPUT CONTRACT
+  setup() must have completed.
 
-SAFETY
-  The actuator is never driven directly from the policy module. The policy must
-  produce a valid command and the safety module must permit actuation; otherwise
-  the actuator is forced to idle.
+OUTPUT CONTRACT
+  When the main period is due, fresh sensor snapshots are acquired, the estimator
+  consumes updated flags, safety/policy are evaluated, actuator output is gated,
+  and telemetry/logging are emitted according to cadence.
+
+MECHANISM
+  1. Service heartbeat and non-blocking commands.
+  2. Return early if the main loop period is not due.
+  3. Poll barometer, IMU, and auxiliary accelerometer once.
+  4. Run migrated estimator kernel:
+       IMU update -> Madgwick attitude -> vertical acceleration -> Kalman predict
+       Baro update -> relative altitude -> Kalman correction
+  5. Compute policy intent.
+  6. Apply actuator command only if safety and policy gates pass.
+  7. Emit telemetry and diagnostics by cadence.
+  8. Service SD logger by cadence.
+
+FAILURE BEHAVIOR
+  Invalid estimator, invalid policy, disabled actuation, or stale state forces
+  idle actuator output.
+
+DETERMINISM
+  Runtime pass is bounded. No blocking waits, retry loops, or dynamic allocation.
 */
 void loop() {
   heartbeat();
@@ -194,11 +254,6 @@ void loop() {
   sensors_poll_imu(state, now_ms);
   sensors_poll_aux(state, now_ms);
 
-  if (state.imu.valid) {
-    attitude_update_gravity_reference(state, state.imu.ax, state.imu.ay, state.imu.az);
-  }
-
-  attitude_update_aux_vertical(state, now_ms);
   estimation_update(state, now_ms);
 
   state.policy = airbrake_policy_compute(state);
