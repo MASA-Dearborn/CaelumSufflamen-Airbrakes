@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include "data_types.h"
 
 /*
 kalman_alt2.h
@@ -23,16 +24,6 @@ IMPLEMENTATION MATCH
     kf_alt2_predict(kf, a_vertical_mps2, dt_s)
 ===============================================================================
 */
-
-struct KfAlt2State {
-  bool seeded = false;
-  float h_m = 0.0f;
-  float v_mps = 0.0f;
-  float P00 = 1.0f;
-  float P01 = 0.0f;
-  float P10 = 0.0f;
-  float P11 = 1.0f;
-};
 
 void kf_alt2_reset(KfAlt2State &kf);
 void kf_alt2_seed(KfAlt2State &kf, float h0_m);
