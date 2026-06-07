@@ -6,16 +6,24 @@
 airbrake_policy.h
 ===============================================================================
 ROLE
-  Airbrake command policy interface.
+  Apogee-prediction airbrake command policy.
+
+CONTROL LAW
+  The policy predicts coast apogee using a vertical quadratic-drag model:
+
+    dv/dt = -g - k(u)v^2
+
+  where:
+
+    k(u) = rho * (CDA_body + u*CDA_brake) / (2*m)
+
+  It selects the smallest normalized deployment command u in [0,1] that brings
+  predicted apogee down to the target apogee, subject to estimator validity,
+  coast-phase gates, model authority, deadband, and slew-rate limiting.
 
 SAFETY CONTRACT
-  The policy computes command intent only. The actuator module and safety module
-  still control whether command intent reaches hardware.
-
-IMPLEMENTATION MATCH
-  This header matches the verified airbrake_policy.cpp public symbols:
-    airbrake_policy_reset(...)
-    airbrake_policy_compute(...)
+  This module computes command intent only. The safety module and actuator module
+  still determine whether command intent reaches hardware.
 ===============================================================================
 */
 
