@@ -1,6 +1,6 @@
 # Caelum Sufflamen Airbrakes
 
-**Caelum Sufflamen** is a deterministic embedded avionics and airbrake-control firmware scaffold for high-power rocketry research. The project emphasizes bounded execution, traceable sensor snapshots, quaternion-based attitude estimation, Kalman-filter-based vertical state estimation, safety-gated actuation, real-time telemetry, and persistent SD-card logging.
+**Caelum Sufflamen** is a deterministic embedded avionics and airbrake-control firmware scaffold. The project emphasizes bounded execution, traceable sensor snapshots, quaternion-based attitude estimation, Kalman-filter-based vertical state estimation, safety-gated actuation, real-time telemetry, and persistent SD-card logging.
 
 The name *Caelum Sufflamen* means “sky brake.” In this repository, the phrase refers to the software architecture supporting a rocket airbrake module: a flight-computer runtime that observes sensor data, estimates vertical state, evaluates an airbrake policy, and only permits actuator motion through explicit safety gates.
 
@@ -365,36 +365,6 @@ SD-card failure is non-fatal. If initialization or runtime writes fail, the logg
 
 ---
 
-## Build and Integration Notes
-
-This repository uses Arduino-style C++ organized into modular folders.
-
-### Expected Tooling
-
-- Arduino IDE or Arduino CLI with Teensy board support
-- Teensyduino / Teensy boards package
-- Teensy Loader or Arduino upload workflow
-- Required libraries:
-  - `Adafruit_BMP5xx`
-  - `BMI088`
-  - `LIS2DU12Sensor`
-  - `SD`
-  - `PWMServo` for Teensy targets, or `Servo` for non-Teensy builds
-
-### Include Path Requirements
-
-The build system must:
-
-- compile `CaelumSufflamen.ino`,
-- compile all `.cpp` files in `src/`,
-- compile all `.cpp` files in `utils/`,
-- expose `include/` and `utils/` as include paths,
-- resolve all sensor and servo library dependencies.
-
-For a plain Arduino IDE sketch workflow, the folder layout may require adjustment because Arduino sketches normally compile files located directly in the sketch folder. Arduino CLI, PlatformIO, or a custom Makefile-style build can handle modular folder layouts more cleanly when configured correctly.
-
----
-
 ## Bring-Up Procedure
 
 Recommended bench bring-up sequence:
@@ -445,8 +415,6 @@ Recommended bench bring-up sequence:
 ### Static and Compile Verification
 
 - [ ] All headers resolve under the selected build system.
-- [ ] All `.cpp` files in `src/` are compiled.
-- [ ] All `.cpp` files in `utils/` are compiled.
 - [ ] Sensor libraries are installed and version-compatible.
 - [ ] Servo backend compiles for the target board.
 - [ ] Compile-time actuation flags are intentionally set.
@@ -492,8 +460,6 @@ Recommended bench bring-up sequence:
 
 ## Known Integration Notes
 
-- The codebase is modularized into `include/`, `src/`, and `utils/`. Build configuration must account for this layout.
-- Utility headers included by the top-level sketch must be available on the include path.
 - `CAL_BASELINE` intentionally blocks for a bounded number of samples; it is a calibration routine, not a flight-loop operation.
 - The current airbrake policy constants are placeholders for future validated control-law development.
 - Compile-time actuation gates should remain disabled until estimator, sensor, and actuator behavior have been verified on the bench.
@@ -502,7 +468,7 @@ Recommended bench bring-up sequence:
 
 ## Future Development
 
-Planned or natural extensions include:
+Potential extensions include:
 
 - formal flight-state machine integration,
 - GPS or GNSS sensor fusion,
