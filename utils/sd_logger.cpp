@@ -98,8 +98,9 @@ static void sd_write_header(File &f) {
     "a_vertical,"
     "est_h,est_v,est_a,"
     "P00,P01,P10,P11,"
-    "warn_mask"
-  );
+    "policy_valid,policy_cmd,"
+    "apogee_no_brake,apogee_full_brake,target_apogee,apogee_error,"
+    "warn_mask");
 }
 
 /*
@@ -322,10 +323,7 @@ DETERMINISM
   at runtime. No dynamic allocation by project code.
 */
 void sd_logger_service(SystemState &state, uint32_t now_us, uint32_t now_ms) {
-  if (!state.sdlog.enabled ||
-      !state.sdlog.card_ok ||
-      !state.sdlog.file_open ||
-      state.sdlog.runtime_failed) {
+  if (!state.sdlog.enabled || !state.sdlog.card_ok || !state.sdlog.file_open || state.sdlog.runtime_failed) {
     return;
   }
 
@@ -365,6 +363,7 @@ void sd_logger_service(SystemState &state, uint32_t now_us, uint32_t now_ms) {
   const float P01 = state.est.valid ? state.est.P01 : NAN;
   const float P10 = state.est.valid ? state.est.P10 : NAN;
   const float P11 = state.est.valid ? state.est.P11 : NAN;
+
 
   uint32_t warn_mask = 0U;
 
@@ -436,6 +435,20 @@ void sd_logger_service(SystemState &state, uint32_t now_us, uint32_t now_ms) {
   state.sdlog.file.print(P11);
   state.sdlog.file.print(',');
 
+  state.sdlog.file.print(state.policy.valid ? 1 : 0);
+  state.sdlog.file.print(',');
+  state.sdlog.file.print(state.policy.command01);
+  state.sdlog.file.print(',');
+  state.sdlog.file.print(state.policy.predicted_apogee_no_brake_m);
+  state.sdlog.file.print(',');
+  state.sdlog.file.print(state.policy.predicted_apogee_full_brake_m);
+  state.sdlog.file.print(',');
+  state.sdlog.file.print(state.policy.target_apogee_m);
+  state.sdlog.file.print(',');
+  state.sdlog.file.print(state.policy.apogee_error_m);
+  state.sdlog.file.print(',');
+
+
   state.sdlog.file.println(warn_mask);
 
   ++state.sdlog.line_count;
@@ -481,8 +494,5 @@ DETERMINISM
   Constant-time. No loops. No SD I/O. No dynamic allocation.
 */
 bool sd_logger_ok(const SystemState &state) {
-  return state.sdlog.enabled &&
-         state.sdlog.card_ok &&
-         state.sdlog.file_open &&
-         !state.sdlog.runtime_failed;
+  return state.sdlog.enabled && state.sdlog.card_ok && state.sdlog.file_open && !state.sdlog.runtime_failed;
 }
