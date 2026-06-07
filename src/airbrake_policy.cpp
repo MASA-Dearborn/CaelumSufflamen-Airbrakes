@@ -73,6 +73,11 @@ void airbrake_policy_reset(SystemState &state) {
   state.policy.valid = false;
   state.policy.command01 = 0.0f;
 
+  state.policy.predicted_apogee_no_brake_m = NAN;
+  state.policy.predicted_apogee_full_brake_m = NAN;
+  state.policy.target_apogee_m = NAN;
+  state.policy.apogee_error_m = NAN;
+
   g_prev_command01 = 0.0f;
   g_prev_ms = millis();
 }
@@ -108,8 +113,7 @@ static float policy_drag_k(float command01) {
   const float u = clamp01(command01);
 
   const float cda =
-    POLICY_CDA_BODY_M2 +
-    u * POLICY_CDA_BRAKE_M2;
+    POLICY_CDA_BODY_M2 + u * POLICY_CDA_BRAKE_M2;
 
   if (!is_finite_f(POLICY_RHO_KGPM3) || POLICY_RHO_KGPM3 <= 0.0f) {
     return 0.0f;
@@ -214,11 +218,8 @@ DETERMINISM
 static float policy_solve_command01(
   float h_m,
   float v_mps,
-  float target_apogee_m
-) {
-  if (!is_finite_f(h_m) ||
-      !is_finite_f(v_mps) ||
-      !is_finite_f(target_apogee_m)) {
+  float target_apogee_m) {
+  if (!is_finite_f(h_m) || !is_finite_f(v_mps) || !is_finite_f(target_apogee_m)) {
     return 0.0f;
   }
 
@@ -398,15 +399,21 @@ DETERMINISM
 AirbrakePolicyOutput airbrake_policy_compute(const SystemState &state) {
   AirbrakePolicyOutput out;
 
+
+
   out.valid = false;
   out.command01 = 0.0f;
+
+  out.predicted_apogee_no_brake_m = NAN;
+  out.predicted_apogee_full_brake_m = NAN;
+  out.target_apogee_m = POLICY_TARGET_APOGEE_M;
+  out.apogee_error_m = NAN;
+
 
 #if AIRBRAKE_POLICY_ENABLED
   const uint32_t now_ms = millis();
 
-  if (!state.est.valid ||
-      !is_finite_f(state.est.h_m) ||
-      !is_finite_f(state.est.v_mps)) {
+  if (!state.est.valid || !is_finite_f(state.est.h_m) || !is_finite_f(state.est.v_mps)) {
     policy_reset_memory(now_ms);
     return out;
   }
@@ -436,12 +443,31 @@ AirbrakePolicyOutput airbrake_policy_compute(const SystemState &state) {
     dt_s = 0.0f;
   }
 
+
+  const float apogee_no_brake =
+    policy_predict_apogee_m(h_m, v_mps, 0.0f);
+
+  const float u_max = clamp01(POLICY_MAX_COMMAND01);
+
+  const float apogee_full_brake =
+    policy_predict_apogee_m(h_m, v_mps, u_max);
+
+
+
+  out.predicted_apogee_no_brake_m = apogee_no_brake;
+  out.predicted_apogee_full_brake_m = apogee_full_brake;
+  out.target_apogee_m = POLICY_TARGET_APOGEE_M;
+
+  if (is_finite_f(apogee_no_brake)) {
+    out.apogee_error_m = apogee_no_brake - POLICY_TARGET_APOGEE_M;
+  }
+
+
   const float desired_command01 =
     policy_solve_command01(
       h_m,
       v_mps,
-      POLICY_TARGET_APOGEE_M
-    );
+      POLICY_TARGET_APOGEE_M);
 
   const float command01 =
     policy_apply_slew_limit(desired_command01, dt_s);
