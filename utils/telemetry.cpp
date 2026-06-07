@@ -99,9 +99,10 @@ void telemetry_print_header(void) {
       "att_valid,att_seq,q0,q1,q2,q3,"
       "auxvz_valid,a_vertical,"
       "est_valid,est_seeded,est_seq,est_h,est_v,est_a,"
+      "policy_valid,policy_cmd,"
+      "apogee_no_brake,apogee_full_brake,target_apogee,apogee_error,"
       "sea_level_hpa,baro_baseline_hpa,"
-      "warn_mask")
-  );
+      "warn_mask"));
 }
 
 /*
@@ -210,6 +211,20 @@ void telemetry_emit_tlm(const SystemState &s) {
   Serial.print(s.est.a_mps2);
   Serial.print(',');
 
+  Serial.print(s.policy.valid ? 1 : 0);
+  Serial.print(',');
+  Serial.print(s.policy.command01);
+  Serial.print(',');
+  Serial.print(s.policy.predicted_apogee_no_brake_m);
+  Serial.print(',');
+  Serial.print(s.policy.predicted_apogee_full_brake_m);
+  Serial.print(',');
+  Serial.print(s.policy.target_apogee_m);
+  Serial.print(',');
+  Serial.print(s.policy.apogee_error_m);
+  Serial.print(',');
+
+
   Serial.print(s.cfg.sea_level_hpa);
   Serial.print(',');
   Serial.print(s.cfg.baro_baseline_hpa);
@@ -265,11 +280,30 @@ void telemetry_print_status(const SystemState &s) {
   Serial.print(F(",est_valid="));
   Serial.print(s.est.valid ? 1 : 0);
 
+
   Serial.print(F(",baro_baseline_hpa="));
   Serial.print(s.cfg.baro_baseline_hpa);
 
   Serial.print(F(",sd_file="));
   Serial.println(s.sdlog.filename);
+
+  Serial.print(F(",policy_valid="));
+  Serial.print(s.policy.valid ? 1 : 0);
+
+  Serial.print(F(",policy_cmd="));
+  Serial.print(s.policy.command01);
+
+  Serial.print(F(",apogee_no_brake="));
+  Serial.print(s.policy.predicted_apogee_no_brake_m);
+
+  Serial.print(F(",apogee_full_brake="));
+  Serial.print(s.policy.predicted_apogee_full_brake_m);
+
+  Serial.print(F(",target_apogee="));
+  Serial.print(s.policy.target_apogee_m);
+
+  Serial.print(F(",apogee_error="));
+  Serial.print(s.policy.apogee_error_m);
 }
 
 /*
