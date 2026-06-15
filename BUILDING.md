@@ -45,9 +45,4 @@ Replace `COM7` with the port reported for the connected Teensy by `arduino-cli b
 - Staged sketch: `.build/teensy41/staged_sketch/`
 - Compiled binaries: `.build/teensy41/output/`
 
-## Current limitations
 
-- exact Teensy core version is still unpinned
-- exact library versions are still unpinned
-- the wrapper assumes `arduino-cli` can already resolve the Teensy platform and required libraries
-- this is a canonical build and flash workflow, not a claim of cross-machine bit-for-bit reproducibility
