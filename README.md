@@ -169,7 +169,6 @@ POLICY 1
 | `simulation/README.md`                                    | Current simulation and planned firmware-in-the-loop/hardware-in-the-loop roadmap.                                    |
 | `BUILDING.md`                                             | Board, FQBN, dependencies, canonical build command, upload command, and limitations.                                 |
 | `Airbrake_Policy_Documentation.md`                        | Narrative expected behavior for phase/policy integration.                                                            |
-| `Repository_Study_Notes.md`                               | Historical engineering study notes; useful context, but partly superseded by current build and validation artifacts. |
 | `.gitignore`                                              | Ignores `.build/`, macOS resource-fork files, Python bytecode, and `__pycache__/`.                                   |
 
 ## Theory of Operation
