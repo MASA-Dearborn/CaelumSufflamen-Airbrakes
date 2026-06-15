@@ -12,17 +12,8 @@ The technical contribution of the repository is a reviewable control and evidenc
 
 ### Purpose
 
-This repository exists to support disciplined development of a model-based rocket airbrake controller on Teensy 4.1 hardware. It is intended to be understandable by reviewers, maintainable by future contributors, and testable before flight hardware is trusted.
+This repository exists to support development of a model-based rocket airbrake controller on Teensy 4.1 hardware. It is intended to be understandable by reviewers, maintainable by future contributors, and testable before flight hardware is trusted.
 
-### Use Cases
-
-| Use case                                      | Repository support                                                                                                    |
-| --------------------------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Bench bring-up of a Teensy 4.1 avionics stack | Canonical Arduino CLI wrapper, serial diagnostics, sensor health flags, idle-forcing actuator path.                   |
-| Airbrake control-law development              | Quadratic-drag apogee predictor, fixed-count command solver, host-side 1D coast simulation, replay validation tools.  |
-| Flight data collection                        | SD CSV logger, live Serial CSV telemetry, warning masks, phase and policy observability fields.                       |
-| Post-flight or post-test review               | Committed validation workflow, previous-year data audit, empirical coefficient fitting script for compatible SD logs. |
-| Technical presentation or review              | Explicit architecture, state contracts, equations, verification gaps, and traceable limitations.                      |
 
 ### Scope
 
@@ -51,21 +42,8 @@ The repository currently covers:
 - Shared warning-mask generation for Serial telemetry and SD logs.
 - Host-side Python tests and validation utilities.
 
-### Evidence Model
 
-The README distinguishes evidence levels as follows.
-
-| Category              | Meaning in this repository                                                                               |
-| --------------------- | -------------------------------------------------------------------------------------------------------- |
-| Confirmed fact        | Directly supported by committed source, scripts, docs, or result artifacts.                              |
-| Engineering inference | Strongly implied by code structure or naming, but not independently proven by committed flight evidence. |
-| Open gap              | Known missing verification, missing data, or unpinned environment detail.                                |
-
-Confirmed facts include the Teensy 4.1 target in `BUILDING.md`, the `teensy:avr:teensy41` FQBN in the build wrapper, the runtime control gates in `utils/commands.cpp` and `src/airbrake_policy.cpp`, and the previous-year data audit result in `validation/results/previous_year_flight_data_audit.json`.
-
-Engineering inferences include the intended rocket-airbrake vehicle context and the physical interpretation of the normalized airbrake command. These are strongly supported by names, comments, equations, and documentation, but the repository does not contain a final mechanical drawing or vehicle test report.
-
-Open gaps include vehicle-specific aerodynamic coefficients, exact library version pinning, complete simulation, firmware-in-the-loop testing, hardware-in-the-loop testing, and committed target-board oscilloscope or logic-analyzer evidence for servo pulse widths.
+Open gaps include vehicle-specific aerodynamic coefficients, complete simulation, firmware-in-the-loop testing, hardware-in-the-loop testing, and committed target-board oscilloscope or logic-analyzer evidence for servo pulse widths.
 
 ## Architecture
 
