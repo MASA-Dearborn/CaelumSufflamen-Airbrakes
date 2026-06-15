@@ -637,9 +637,7 @@ The current harness includes checks for:
 ### What Is Not Yet Verified
 
 | Gap                                                                             | Consequence                                                                                                              |
-| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
-| No committed Teensy 4.1 build transcript from a pinned environment.             | Build workflow is canonical but not bit-for-bit reproducible.                                                            |
-| No exact library versions are pinned.                                           | Different developer machines may resolve different sensor or Teensy library versions.                                    |
+| ------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------ |                        |
 | No current-flight SD log with policy command and coast-through-apogee evidence. | Aerodynamic constants remain placeholders.                                                                               |
 | No firmware-in-the-loop test binary.                                            | Host tests model selected behavior in Python rather than compiling firmware C++ against shims.                           |
 | No hardware-in-the-loop rig.                                                    | Real scheduler timing, SD behavior, sensor injection, Serial scripts, and servo pulses are not yet repeatably exercised. |
